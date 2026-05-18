@@ -5,6 +5,7 @@ import ErrorMessage from "../components/ErrorMessage";
 import LineChart from "../components/Charts/LineChart";
 import BarChart from "../components/Charts/BarChart";
 import ExportButton from "../components/ExportButton";
+import SeasonSelector from "../components/SeasonSelector";
 import { fetchBattingStats, fetchPlayer, fetchPlayerTrend } from "../utils/api";
 import type { BattingStats, TrendData, GameRecord } from "../types";
 
@@ -22,16 +23,17 @@ export default function PlayersPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [teamFilter, setTeamFilter] = useState("All Teams");
+  const [season, setSeason] = useState<number | undefined>(undefined);
   const [expandedPlayer, setExpandedPlayer] = useState<string | null>(null);
   const [trendData, setTrendData] = useState<TrendData[]>([]);
   const [gameLogs, setGameLogs] = useState<GameRecord[]>([]);
   const [trendLoading, setTrendLoading] = useState(false);
 
-  const load = async () => {
+  const load = async (s?: number) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchBattingStats();
+      const data = await fetchBattingStats(undefined, undefined, s);
       setPlayers(data);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load player data.");
@@ -41,8 +43,8 @@ export default function PlayersPage() {
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    load(season);
+  }, [season]);
 
   const handleRowClick = async (playerName: string) => {
     if (expandedPlayer === playerName) {
@@ -105,7 +107,7 @@ export default function PlayersPage() {
       </p>
 
       {/* Filters + Export */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-5 items-start sm:items-center">
+      <div className="flex flex-col sm:flex-row gap-3 mb-5 items-start sm:items-center flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
@@ -124,6 +126,7 @@ export default function PlayersPage() {
             <option key={t}>{t}</option>
           ))}
         </select>
+        <SeasonSelector value={season} onChange={(s) => setSeason(s)} />
         <ExportButton
           label="Export CSV"
           href={`${API_BASE}/export/batting-csv`}
@@ -145,6 +148,9 @@ export default function PlayersPage() {
                 <th>OBP</th>
                 <th>SLG</th>
                 <th>OPS</th>
+                <th title="Batting Average on Balls In Play">BABIP</th>
+                <th title="Weighted On-Base Average">wOBA</th>
+                <th title="Weighted Runs Created Plus (100 = league avg)">wRC+</th>
                 <th>HR</th>
                 <th>RBI</th>
                 <th>R</th>
@@ -156,7 +162,7 @@ export default function PlayersPage() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="text-center text-gray-400 py-8">
+                  <td colSpan={17} className="text-center text-gray-400 py-8">
                     No players found.
                   </td>
                 </tr>
@@ -186,6 +192,23 @@ export default function PlayersPage() {
                       <td>{formatAvg(p.obp)}</td>
                       <td>{formatAvg(p.slg)}</td>
                       <td className="font-semibold">{p.ops.toFixed(3)}</td>
+                      <td className="text-gray-600 dark:text-slate-400">
+                        {p.babip != null ? formatAvg(p.babip) : "—"}
+                      </td>
+                      <td className="text-emerald-700 dark:text-emerald-400 font-medium">
+                        {p.woba != null ? formatAvg(p.woba) : "—"}
+                      </td>
+                      <td
+                        className={`font-bold ${
+                          (p.wrc_plus ?? 100) >= 120
+                            ? "text-emerald-600"
+                            : (p.wrc_plus ?? 100) >= 90
+                            ? "text-gray-800 dark:text-slate-200"
+                            : "text-red-500"
+                        }`}
+                      >
+                        {p.wrc_plus ?? "—"}
+                      </td>
                       <td>{p.home_runs}</td>
                       <td>{p.rbi}</td>
                       <td>{p.runs}</td>
@@ -203,7 +226,7 @@ export default function PlayersPage() {
                     {/* Expanded row */}
                     {expandedPlayer === p.player_name && (
                       <tr key={`${p.player_name}-expanded`}>
-                        <td colSpan={14} className="p-0 bg-blue-50 dark:bg-slate-700">
+                        <td colSpan={17} className="p-0 bg-blue-50 dark:bg-slate-700">
                           <div className="p-4">
                             {/* Export PDF button */}
                             <div className="flex justify-end mb-3">

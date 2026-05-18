@@ -11,6 +11,7 @@ import type {
   PlayerCompare,
   GameRecordInput,
   GameSession,
+  ActiveGameSession,
   AuthResponse,
 } from "../types";
 
@@ -22,13 +23,25 @@ const api = axios.create({
   timeout: 15000,
 });
 
+export async function fetchSeasons(): Promise<number[]> {
+  const res = await api.get<number[]>("/seasons");
+  return res.data;
+}
+
+export async function fetchGameSessions(): Promise<ActiveGameSession[]> {
+  const res = await api.get<ActiveGameSession[]>("/game-mode/sessions");
+  return res.data;
+}
+
 export async function fetchDashboard(
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  season?: number
 ): Promise<DashboardData> {
-  const params: Record<string, string> = {};
+  const params: Record<string, string | number> = {};
   if (startDate) params.start_date = startDate;
   if (endDate) params.end_date = endDate;
+  if (season) params.season = season;
   const res = await api.get<DashboardData>("/stats/dashboard", { params });
   return res.data;
 }
@@ -80,22 +93,26 @@ export async function fetchTeamGames(name: string): Promise<TeamGame[]> {
 
 export async function fetchBattingStats(
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  season?: number
 ): Promise<BattingStats[]> {
-  const params: Record<string, string> = {};
+  const params: Record<string, string | number> = {};
   if (startDate) params.start_date = startDate;
   if (endDate) params.end_date = endDate;
+  if (season) params.season = season;
   const res = await api.get<BattingStats[]>("/stats/batting", { params });
   return res.data;
 }
 
 export async function fetchPitchingStats(
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  season?: number
 ): Promise<PitchingStats[]> {
-  const params: Record<string, string> = {};
+  const params: Record<string, string | number> = {};
   if (startDate) params.start_date = startDate;
   if (endDate) params.end_date = endDate;
+  if (season) params.season = season;
   const res = await api.get<PitchingStats[]>("/stats/pitching", { params });
   return res.data;
 }

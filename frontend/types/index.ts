@@ -17,6 +17,9 @@ export interface BattingStats {
   obp: number;
   slg: number;
   ops: number;
+  babip?: number;
+  woba?: number;
+  wrc_plus?: number;
 }
 
 export interface PitchingStats {
@@ -33,6 +36,17 @@ export interface PitchingStats {
   whip: number;
   k_per_9: number;
   bb_per_9: number;
+  k_bb?: number;
+  h_per_9?: number;
+}
+
+export interface ActiveGameSession {
+  game_id: string;
+  home_team: string;
+  away_team: string;
+  game_date: string;
+  saved: boolean;
+  created_at: string;
 }
 
 export interface PlayerCompare extends BattingStats {

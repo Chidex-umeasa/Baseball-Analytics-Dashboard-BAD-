@@ -60,6 +60,46 @@ class AnalyticsService:
             axis=1
         )
 
+        # Advanced sabermetrics
+        grouped["singles"] = (
+            grouped["hits"] - grouped["doubles"] - grouped["triples"] - grouped["home_runs"]
+        )
+
+        grouped["babip"] = grouped.apply(
+            lambda r: round(
+                (r["hits"] - r["home_runs"]) / (r["at_bats"] - r["strikeouts"] - r["home_runs"])
+                if (r["at_bats"] - r["strikeouts"] - r["home_runs"]) > 0 else 0.0,
+                3,
+            ),
+            axis=1,
+        )
+
+        grouped["woba"] = grouped.apply(
+            lambda r: round(
+                (
+                    0.69 * r["walks"] + 0.72 * r["hit_by_pitch"]
+                    + 0.888 * r["singles"] + 1.271 * r["doubles"]
+                    + 1.616 * r["triples"] + 2.101 * r["home_runs"]
+                ) / (r["at_bats"] + r["walks"] + r["hit_by_pitch"])
+                if (r["at_bats"] + r["walks"] + r["hit_by_pitch"]) > 0 else 0.0,
+                3,
+            ),
+            axis=1,
+        )
+
+        total_woba_num = (
+            0.69 * grouped["walks"] + 0.72 * grouped["hit_by_pitch"]
+            + 0.888 * grouped["singles"] + 1.271 * grouped["doubles"]
+            + 1.616 * grouped["triples"] + 2.101 * grouped["home_runs"]
+        ).sum()
+        total_pa = (grouped["at_bats"] + grouped["walks"] + grouped["hit_by_pitch"]).sum()
+        league_woba = total_woba_num / total_pa if total_pa > 0 else 0.320
+
+        grouped["wrc_plus"] = grouped.apply(
+            lambda r: round((r["woba"] / league_woba) * 100) if league_woba > 0 else 100,
+            axis=1,
+        )
+
         return grouped.sort_values("batting_avg", ascending=False)
 
     def calculate_pitching_stats(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -103,6 +143,18 @@ class AnalyticsService:
             lambda r: round((r["walks_allowed"] * 9) / r["innings_pitched"], 2)
             if r["innings_pitched"] > 0 else 0.0,
             axis=1
+        )
+
+        grouped["k_bb"] = grouped.apply(
+            lambda r: round(r["strikeouts_pitched"] / r["walks_allowed"], 2)
+            if r["walks_allowed"] > 0 else float(r["strikeouts_pitched"]),
+            axis=1,
+        )
+
+        grouped["h_per_9"] = grouped.apply(
+            lambda r: round((r["hits_allowed"] * 9) / r["innings_pitched"], 2)
+            if r["innings_pitched"] > 0 else 0.0,
+            axis=1,
         )
 
         return grouped.sort_values("era", ascending=True)
