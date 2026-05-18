@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { CheckCircle, AlertCircle, Play, Square } from "lucide-react";
-import { startGame, logAtBat, logPitch, fetchScoreboard, saveGame } from "../utils/api";
-import type { GameSession, LivePlayerStats, LivePitcherStats } from "../types";
+import { useState, useEffect } from "react";
+import { CheckCircle, AlertCircle, Play, Square, RotateCcw } from "lucide-react";
+import { startGame, logAtBat, logPitch, fetchScoreboard, saveGame, fetchGameSessions } from "../utils/api";
+import type { GameSession, LivePlayerStats, LivePitcherStats, ActiveGameSession } from "../types";
 import { useToast } from "../context/ToastContext";
 
 const AT_BAT_RESULTS = ["single", "double", "triple", "hr", "walk", "strikeout", "out"];
@@ -37,6 +37,26 @@ export default function GameModePage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const [activeSessions, setActiveSessions] = useState<ActiveGameSession[]>([]);
+
+  useEffect(() => {
+    fetchGameSessions().then(setActiveSessions).catch(() => setActiveSessions([]));
+  }, []);
+
+  const handleResumeGame = async (gid: string) => {
+    setError(null);
+    try {
+      const s = await fetchScoreboard(gid);
+      setGameId(gid);
+      setSession(s);
+      setAbTeam(s.home_team);
+      setPitcherTeam(s.home_team);
+      addToast(`Resumed game ${gid}`, "success");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to resume game.");
+    }
+  };
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -142,6 +162,34 @@ export default function GameModePage() {
         <div className="flex items-center gap-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-300 rounded-xl px-5 py-3 mb-4">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <span className="text-sm">{error}</span>
+        </div>
+      )}
+
+      {/* Resume Panel */}
+      {!session && activeSessions.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-4 mb-5 max-w-xl">
+          <div className="flex items-center gap-2 mb-3">
+            <RotateCcw className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            <span className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+              In-progress games
+            </span>
+          </div>
+          <ul className="space-y-2">
+            {activeSessions.map((s) => (
+              <li key={s.game_id} className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-gray-700 dark:text-slate-300">
+                  <span className="font-medium">{s.home_team} vs {s.away_team}</span>
+                  {" · "}{s.game_date}{" · "}<span className="text-gray-400 text-xs">{s.game_id}</span>
+                </span>
+                <button
+                  onClick={() => handleResumeGame(s.game_id)}
+                  className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+                >
+                  <RotateCcw className="w-3 h-3" /> Resume
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

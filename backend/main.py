@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import engine, SessionLocal, Base
 from backend.models.game_record import GameRecord
+from backend.models.game_session import GameSession
 from backend.models.user import User
 from backend.routes import players, teams, stats, upload
 from backend.routes import export, game_mode, auth

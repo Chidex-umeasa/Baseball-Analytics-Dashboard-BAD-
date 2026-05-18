@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import extract
 import pandas as pd
 from typing import List, Dict, Any, Optional
 from datetime import date
@@ -16,8 +17,12 @@ def records_to_df(
     db: Session,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    season: Optional[int] = None,
 ) -> pd.DataFrame:
     query = db.query(GameRecord)
+
+    if season:
+        query = query.filter(extract("year", GameRecord.game_date) == season)
 
     if start_date:
         try:
@@ -66,13 +71,24 @@ def records_to_df(
     return pd.DataFrame(data)
 
 
+@router.get("/seasons")
+def get_seasons(db: Session = Depends(get_db)) -> List[int]:
+    rows = (
+        db.query(extract("year", GameRecord.game_date).label("year"))
+        .distinct()
+        .all()
+    )
+    return sorted([int(r.year) for r in rows if r.year], reverse=True)
+
+
 @router.get("/stats/batting")
 def get_batting_leaderboard(
     start_date: Optional[str] = Query(default=None),
     end_date: Optional[str] = Query(default=None),
+    season: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
 ) -> List[Dict[str, Any]]:
-    df = records_to_df(db, start_date, end_date)
+    df = records_to_df(db, start_date, end_date, season)
     if df.empty:
         return []
     batting_df = analytics.calculate_batting_stats(df)
@@ -83,9 +99,10 @@ def get_batting_leaderboard(
 def get_pitching_leaderboard(
     start_date: Optional[str] = Query(default=None),
     end_date: Optional[str] = Query(default=None),
+    season: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
 ) -> List[Dict[str, Any]]:
-    df = records_to_df(db, start_date, end_date)
+    df = records_to_df(db, start_date, end_date, season)
     if df.empty:
         return []
     pitching_df = analytics.calculate_pitching_stats(df)
@@ -95,8 +112,11 @@ def get_pitching_leaderboard(
 
 
 @router.get("/stats/insights")
-def get_insights(db: Session = Depends(get_db)) -> List[str]:
-    df = records_to_df(db)
+def get_insights(
+    season: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> List[str]:
+    df = records_to_df(db, season=season)
     if df.empty:
         return []
     batting_df = analytics.calculate_batting_stats(df)
@@ -109,9 +129,10 @@ def get_insights(db: Session = Depends(get_db)) -> List[str]:
 def get_dashboard(
     start_date: Optional[str] = Query(default=None),
     end_date: Optional[str] = Query(default=None),
+    season: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    df = records_to_df(db, start_date, end_date)
+    df = records_to_df(db, start_date, end_date, season)
     if df.empty:
         return {
             "total_games": 0,

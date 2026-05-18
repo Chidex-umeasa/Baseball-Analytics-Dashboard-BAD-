@@ -1,16 +1,18 @@
 import uuid
+import json
+from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
-from datetime import date
 
 from backend.database import get_db
 from backend.models.game_record import GameRecord
+from backend.models.game_session import GameSession
 
 router = APIRouter()
 
-# In-memory storage for active game sessions
+# In-memory cache for active sessions (warmed from DB on demand)
 _game_sessions: Dict[str, Dict[str, Any]] = {}
 
 
@@ -34,8 +36,63 @@ class PitchBody(BaseModel):
     result: str  # strikeout, ball, hit, walk
 
 
+def _persist_session(db: Session, session: Dict[str, Any]) -> None:
+    """Upsert session state into the database."""
+    game_id = session["game_id"]
+    row = db.query(GameSession).filter(GameSession.game_id == game_id).first()
+    session_json = json.dumps(session)
+    if row:
+        row.session_data = session_json
+        row.saved = session["saved"]
+        row.updated_at = datetime.utcnow()
+    else:
+        db.add(GameSession(
+            game_id=game_id,
+            home_team=session["home_team"],
+            away_team=session["away_team"],
+            game_date=session["game_date"],
+            session_data=session_json,
+            saved=session["saved"],
+        ))
+    db.commit()
+
+
+def _load_session(db: Session, game_id: str) -> Optional[Dict[str, Any]]:
+    """Return session from memory cache, falling back to DB on cache miss."""
+    if game_id in _game_sessions:
+        return _game_sessions[game_id]
+    row = db.query(GameSession).filter(GameSession.game_id == game_id).first()
+    if row:
+        session = json.loads(row.session_data)
+        _game_sessions[game_id] = session
+        return session
+    return None
+
+
+@router.get("/game-mode/sessions")
+def list_sessions(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    """List all in-progress (not yet saved) game sessions."""
+    rows = (
+        db.query(GameSession)
+        .filter(GameSession.saved == False)  # noqa: E712
+        .order_by(GameSession.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "game_id": r.game_id,
+            "home_team": r.home_team,
+            "away_team": r.away_team,
+            "game_date": r.game_date,
+            "saved": r.saved,
+            "created_at": str(r.created_at),
+        }
+        for r in rows
+    ]
+
+
 @router.post("/game-mode/start")
-def start_game(body: StartGameBody) -> Dict[str, Any]:
+def start_game(body: StartGameBody, db: Session = Depends(get_db)) -> Dict[str, Any]:
     game_id = f"GM-{uuid.uuid4().hex[:8].upper()}"
     session: Dict[str, Any] = {
         "game_id": game_id,
@@ -51,18 +108,17 @@ def start_game(body: StartGameBody) -> Dict[str, Any]:
         "saved": False,
     }
     _game_sessions[game_id] = session
+    _persist_session(db, session)
     return {"game_id": game_id, "message": "Game session started", "session": session}
 
 
 @router.post("/game-mode/at-bat")
-def log_at_bat(body: AtBatBody) -> Dict[str, Any]:
-    if body.game_id not in _game_sessions:
+def log_at_bat(body: AtBatBody, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    session = _load_session(db, body.game_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Game session not found.")
 
-    session = _game_sessions[body.game_id]
     result = body.result.lower()
-
-    # Update player stats
     key = f"{body.player_name}|{body.team}"
     if key not in session["player_stats"]:
         session["player_stats"][key] = {
@@ -91,7 +147,6 @@ def log_at_bat(body: AtBatBody) -> Dict[str, Any]:
         elif result == "hr":
             stats["home_runs"] += 1
             stats["runs"] += 1
-            # Update score
             if body.team in session["score"]:
                 session["score"][body.team] += 1
     elif result == "walk":
@@ -103,18 +158,18 @@ def log_at_bat(body: AtBatBody) -> Dict[str, Any]:
         stats["at_bats"] += 1
 
     session["at_bats"].append({"player": body.player_name, "team": body.team, "result": result})
+    _persist_session(db, session)
 
     return {"message": "At-bat logged", "player_stats": stats, "score": session["score"]}
 
 
 @router.post("/game-mode/pitch")
-def log_pitch(body: PitchBody) -> Dict[str, Any]:
-    if body.game_id not in _game_sessions:
+def log_pitch(body: PitchBody, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    session = _load_session(db, body.game_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Game session not found.")
 
-    session = _game_sessions[body.game_id]
     result = body.result.lower()
-
     key = f"{body.pitcher_name}|{body.team}"
     if key not in session["pitcher_stats"]:
         session["pitcher_stats"][key] = {
@@ -138,16 +193,17 @@ def log_pitch(body: PitchBody) -> Dict[str, Any]:
         stats["hits_allowed"] += 1
 
     session["pitches"].append({"pitcher": body.pitcher_name, "team": body.team, "result": result})
+    _persist_session(db, session)
 
     return {"message": "Pitch logged", "pitcher_stats": stats}
 
 
 @router.get("/game-mode/{game_id}/scoreboard")
-def get_scoreboard(game_id: str) -> Dict[str, Any]:
-    if game_id not in _game_sessions:
+def get_scoreboard(game_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    session = _load_session(db, game_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Game session not found.")
 
-    session = _game_sessions[game_id]
     return {
         "game_id": game_id,
         "home_team": session["home_team"],
@@ -163,10 +219,9 @@ def get_scoreboard(game_id: str) -> Dict[str, Any]:
 
 @router.post("/game-mode/{game_id}/save")
 def save_game(game_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    if game_id not in _game_sessions:
+    session = _load_session(db, game_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Game session not found.")
-
-    session = _game_sessions[game_id]
     if session["saved"]:
         raise HTTPException(status_code=400, detail="Game already saved.")
 
@@ -177,12 +232,9 @@ def save_game(game_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
 
     records_saved = 0
 
-    # Save batting records
     for key, pstats in session["player_stats"].items():
         player_name = pstats["player_name"]
         team = pstats["team"]
-
-        # Determine opponent
         opponent = session["away_team"] if team == session["home_team"] else session["home_team"]
 
         existing = db.query(GameRecord).filter(GameRecord.player_name == player_name).first()
@@ -215,7 +267,6 @@ def save_game(game_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
         db.add(record)
         records_saved += 1
 
-    # Save pitching records
     for key, pstats in session["pitcher_stats"].items():
         pitcher_name = pstats["pitcher_name"]
         team = pstats["team"]
@@ -253,5 +304,6 @@ def save_game(game_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
 
     db.commit()
     session["saved"] = True
+    _persist_session(db, session)
 
     return {"success": True, "message": f"Saved {records_saved} records.", "records_saved": records_saved}

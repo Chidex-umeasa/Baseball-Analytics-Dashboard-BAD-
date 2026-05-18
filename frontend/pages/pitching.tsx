@@ -5,6 +5,7 @@ import ErrorMessage from "../components/ErrorMessage";
 import BarChart from "../components/Charts/BarChart";
 import LineChart from "../components/Charts/LineChart";
 import ExportButton from "../components/ExportButton";
+import SeasonSelector from "../components/SeasonSelector";
 import { fetchPitchingStats, fetchPlayerTrend } from "../utils/api";
 import type { PitchingStats, TrendData } from "../types";
 
@@ -15,12 +16,13 @@ export default function PitchingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [topPitcherTrend, setTopPitcherTrend] = useState<TrendData[]>([]);
+  const [season, setSeason] = useState<number | undefined>(undefined);
 
-  const load = async () => {
+  const load = async (s?: number) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchPitchingStats();
+      const data = await fetchPitchingStats(undefined, undefined, s);
       setPitchers(data);
       if (data.length > 0) {
         try {
@@ -38,8 +40,8 @@ export default function PitchingPage() {
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    load(season);
+  }, [season]);
 
   if (loading) return <LoadingSpinner />;
   if (error) return <ErrorMessage message={error} onRetry={load} />;
@@ -72,8 +74,9 @@ export default function PitchingPage() {
       <h1 className="page-title">Pitching Analytics</h1>
       <p className="page-subtitle">Pitching leaderboard sorted by ERA</p>
 
-      {/* Export Button */}
-      <div className="flex justify-end mb-4">
+      {/* Filters + Export */}
+      <div className="flex flex-wrap gap-3 justify-between items-center mb-4">
+        <SeasonSelector value={season} onChange={(s) => setSeason(s)} />
         <ExportButton
           label="Export CSV"
           href={`${API_BASE}/export/pitching-csv`}
@@ -94,6 +97,8 @@ export default function PitchingPage() {
                 <th>WHIP</th>
                 <th>K/9</th>
                 <th>BB/9</th>
+                <th title="Strikeout-to-Walk Ratio">K/BB</th>
+                <th title="Hits Allowed per 9 Innings">H/9</th>
                 <th>IP</th>
                 <th>SO</th>
                 <th>BB</th>
@@ -103,7 +108,7 @@ export default function PitchingPage() {
             <tbody>
               {pitchers.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="text-center text-gray-400 py-8">
+                  <td colSpan={13} className="text-center text-gray-400 py-8">
                     No pitching data.
                   </td>
                 </tr>
@@ -135,6 +140,18 @@ export default function PitchingPage() {
                       {p.k_per_9.toFixed(1)}
                     </td>
                     <td>{p.bb_per_9.toFixed(1)}</td>
+                    <td
+                      className={`font-semibold ${
+                        (p.k_bb ?? 0) >= 3
+                          ? "text-emerald-600"
+                          : (p.k_bb ?? 0) >= 2
+                          ? "text-gray-800 dark:text-slate-200"
+                          : "text-red-500"
+                      }`}
+                    >
+                      {p.k_bb != null ? p.k_bb.toFixed(2) : "—"}
+                    </td>
+                    <td>{p.h_per_9 != null ? p.h_per_9.toFixed(1) : "—"}</td>
                     <td>{p.innings_pitched.toFixed(1)}</td>
                     <td>{p.strikeouts_pitched}</td>
                     <td>{p.walks_allowed}</td>
